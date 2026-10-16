@@ -312,9 +312,30 @@ class LightRec(tk.Tk):
             if not candidate:
                 prompt.set("快捷键无效。请使用 Ctrl/Alt 组合键，或单独使用 F1–F12。")
                 return "break"
-            self.settings_dialog.pending_hotkeys[action] = candidate
+            pending = self.settings_dialog.pending_hotkeys.copy()
+            pending[action] = candidate
+            chords = [parse_hotkey(pending[name]) for name in DEFAULT_HOTKEYS]
+            if None in chords or len(set(chords)) != len(chords):
+                prompt.set("这个快捷键与其他功能重复，请录入不同的按键。")
+                return "break"
+
+            self.settings_dialog.pending_hotkeys = pending
             self.settings_dialog.hotkey_labels[action].set(candidate)
-            finish()
+            self.hotkey_bindings = pending.copy()
+            self._save_settings()
+            self._register_hotkeys()
+            self._refresh_hotkey_summary()
+            if not self.hotkeys.ready.is_set():
+                self.settings_dialog.hotkey_status.set("快捷键已保存，正在注册…")
+            elif self.hotkeys.failures:
+                self.settings_dialog.hotkey_status.set(
+                    "快捷键已保存，但无法注册，可能被 Windows 或其他程序占用："
+                    + "、".join(self.hotkeys.failures)
+                    + "。请录入其他按键。"
+                )
+            else:
+                self.settings_dialog.hotkey_status.set("快捷键已保存并生效。")
+            finish(restart=False)
             return "break"
 
         def key_released(event) -> None:
