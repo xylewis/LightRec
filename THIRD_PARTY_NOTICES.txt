@@ -1,0 +1,18 @@
+LightRec Portable x64 — third-party components
+
+FFmpeg 8.0.1 full build
+  Provider: Gyan Doshi (gyan.dev)
+  Build license: GPLv3, static Windows build
+  FFmpeg source: https://github.com/FFmpeg/FFmpeg/tree/n8.0.1
+  Build provider and package information: https://www.gyan.dev/ffmpeg/builds/
+  FFmpeg license information: https://ffmpeg.org/legal.html
+  This package includes the unmodified ffmpeg.exe. The LightRec application
+  invokes it as a separate process.
+
+Python 3.14 runtime, NumPy, SoundCard, and PyInstaller
+  Python: https://docs.python.org/3/license.html
+  NumPy: https://numpy.org/doc/stable/license.html
+  SoundCard: https://github.com/bastibe/SoundCard
+  PyInstaller: https://pyinstaller.org/en/stable/license.html
+
+The LightRec application source remains in the LightRec project folder.
