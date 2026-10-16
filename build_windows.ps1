@@ -53,6 +53,9 @@ try {
 
     Compress-Archive -Path (Join-Path $stageDir "*") -DestinationPath $stagedArchive -CompressionLevel Optimal -Force
     Move-Item -LiteralPath $stagedArchive -Destination $archive -Force
+    if (Test-Path -LiteralPath $packageDir) {
+        Remove-Item -LiteralPath $packageDir -Recurse -Force
+    }
     New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
     Copy-Item -Path (Join-Path $stagedPackage "*") -Destination $packageDir -Recurse -Force
 }
