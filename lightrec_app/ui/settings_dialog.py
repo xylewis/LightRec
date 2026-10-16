@@ -40,17 +40,18 @@ class SettingsDialog:
         window.transient(self.parent)
         body = ttk.Frame(window, padding=16)
         body.pack(fill="both", expand=True)
+
+        footer = ttk.Frame(body)
+        footer.pack(side="bottom", fill="x", pady=(12, 0))
+        ttk.Label(footer, text="设置会自动保存在当前 Windows 用户下。", foreground="#666").pack(side="left")
+        ttk.Button(footer, text="应用并关闭", command=self.on_apply).pack(side="right")
+
         tabs = ttk.Notebook(body)
-        tabs.pack(fill="both", expand=True)
+        tabs.pack(side="top", fill="both", expand=True)
 
         self._add_recording_tab(tabs)
         self._add_edge_tab(tabs)
         self._add_hotkeys_tab(tabs)
-
-        footer = ttk.Frame(body)
-        footer.pack(fill="x", pady=(12, 0))
-        ttk.Label(footer, text="设置会自动保存在当前 Windows 用户下。", foreground="#666").pack(side="left")
-        ttk.Button(footer, text="应用并关闭", command=self.on_apply).pack(side="right")
         window.protocol("WM_DELETE_WINDOW", self.on_apply)
         window.bind("<Escape>", lambda _event: self.on_apply())
         return window
