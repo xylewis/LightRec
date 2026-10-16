@@ -369,7 +369,7 @@ def capture_audio(encoder: subprocess.Popen, stop: threading.Event, started: thr
 class LightRec(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("LightRec 屏幕录制")
+        self.title(APP_NAME)
         self.geometry("560x455")
         self.minsize(500, 410)
         self.resizable(True, True)
@@ -598,7 +598,7 @@ class LightRec(tk.Tk):
             return
         window = tk.Toplevel(self)
         self.settings_window = window
-        window.title("LightRec 设置")
+        window.title(f"{APP_NAME} Settings")
         window.geometry("600x520")
         window.minsize(560, 470)
         window.transient(self)
@@ -1538,7 +1538,7 @@ class LightRec(tk.Tk):
                 pystray.MenuItem("打开 LightRec", self._tray_restore, default=True),
                 pystray.MenuItem("退出程序", self._tray_exit),
             )
-            self.tray_icon = pystray.Icon("LightRec", image, "LightRec 屏幕录制", menu)
+            self.tray_icon = pystray.Icon(APP_NAME, image, APP_NAME, menu)
             self.tray_thread = threading.Thread(target=self.tray_icon.run, daemon=True)
             self.tray_thread.start()
         self.withdraw()
