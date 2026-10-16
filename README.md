@@ -36,3 +36,12 @@ py -3.14 -m pip install -r requirements-audio.txt -r requirements-build.txt
 ```
 
 第三方组件信息和许可证见 `THIRD_PARTY_NOTICES.txt`。当前电脑已验证短时录制；不同 Windows 版本和编码硬件仍需在对应电脑上实测。
+
+## 源码结构
+
+- `lightrec.py`：启动入口。
+- `lightrec_app/app.py`：主窗口与应用流程协调，收集设置后交给录制会话。
+- `lightrec_app/recording.py`：视频/音频进程生命周期、硬件回退和 MP4 收尾。
+- `lightrec_app/media.py`、`audio.py`：FFmpeg 命令与编码器探测、WASAPI 音频采集。
+- `lightrec_app/config.py`、`hotkeys.py`：设置文件与热键值解析、系统全局热键线程。
+- `lightrec_app/ui/`、`tray.py`：设置窗口、选区、描边提示和系统托盘组件。
