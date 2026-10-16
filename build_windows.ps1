@@ -54,7 +54,13 @@ try {
     Compress-Archive -Path (Join-Path $stageDir "*") -DestinationPath $stagedArchive -CompressionLevel Optimal -Force
     Move-Item -LiteralPath $stagedArchive -Destination $archive -Force
     if (Test-Path -LiteralPath $packageDir) {
-        Remove-Item -LiteralPath $packageDir -Recurse -Force
+        try {
+            Remove-Item -LiteralPath $packageDir -Recurse -Force
+        }
+        catch {
+            $packageDir = Join-Path $distRoot ("$packageName-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+            Write-Warning "旧便携目录正被使用，新的文件夹版将输出到 $packageDir。"
+        }
     }
     New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
     Copy-Item -Path (Join-Path $stagedPackage "*") -Destination $packageDir -Recurse -Force
