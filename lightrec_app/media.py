@@ -96,21 +96,28 @@ def ffmpeg_has_filter(ffmpeg: str, name: str) -> bool:
 def build_video_args(*, ffmpeg: str, encoder: str, fps: int, video_bitrate: int,
                      duplicate_frames: int, display: int,
                      region: tuple[int, int, int, int] | None,
-                     output_path: Path, direct: bool) -> list[str]:
+                     output_path: Path, direct: bool,
+                     still_image_path: Path | None = None) -> list[str]:
     args = [ffmpeg, "-hide_banner", "-nostats", "-loglevel", "warning"]
-    if direct:
+    if direct and still_image_path is None:
         args += ["-init_hw_device", "d3d11va=dev:0", "-filter_hw_device", "dev"]
         if encoder.endswith("_amf"):
             args += ["-init_hw_device", "amf=amf@dev"]
         elif encoder.endswith("_qsv"):
             args += ["-init_hw_device", "qsv=qsv@dev"]
-    capture_options = [f"output_idx={display}", f"framerate={fps}",
-                       "draw_mouse=1", f"dup_frames={duplicate_frames}"]
-    if region:
-        x, y, width, height = region
-        capture_options.extend((f"video_size={width}x{height}", f"offset_x={x}", f"offset_y={y}"))
-    args += ["-f", "lavfi", "-i", "ddagrab=" + ":".join(capture_options)]
-    if direct and encoder == "h264_amf":
+    if still_image_path:
+        args += ["-loop", "1", "-framerate", str(fps), "-i", str(still_image_path)]
+    else:
+        capture_options = [f"output_idx={display}", f"framerate={fps}",
+                           "draw_mouse=1", f"dup_frames={duplicate_frames}"]
+        if region:
+            x, y, width, height = region
+            capture_options.extend((f"video_size={width}x{height}", f"offset_x={x}", f"offset_y={y}"))
+        args += ["-f", "lavfi", "-i", "ddagrab=" + ":".join(capture_options)]
+    if still_image_path:
+        pixel_format = "nv12" if encoder.endswith(("_amf", "_qsv", "_nvenc", "_mf")) else "yuv420p"
+        args += ["-vf", f"format={pixel_format}"]
+    elif direct and encoder == "h264_amf":
         args += ["-vf", "scale_d3d11=format=nv12"]
     elif not direct:
         pixel_format = "nv12" if encoder.endswith(("_qsv", "_nvenc", "_mf")) else "yuv420p"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+from ctypes import wintypes
 import os
 import queue
 import sys
@@ -46,6 +47,7 @@ class LightRec(tk.Tk):
         self.region: tuple[int, int, int, int] | None = None
         self.click_through = tk.BooleanVar(value=bool(saved.get("click_through", False)))
         self.skip_unchanged = tk.BooleanVar(value=bool(saved.get("skip_unchanged", False)))
+        self.record_while_locked = tk.BooleanVar(value=bool(saved.get("record_while_locked", True)))
         self.audio = tk.BooleanVar(value=bool(saved.get("audio", True)))
         self.audio_source = tk.StringVar(value=saved_choice(
             saved, "audio_source", ("电脑声音 + 麦克风", "电脑声音", "麦克风"), "电脑声音 + 麦克风"))
@@ -95,7 +97,7 @@ class LightRec(tk.Tk):
 
         self._build_ui()
         for variable in (self.output_dir, self.codec, self.fps, self.target_total_bitrate,
-                         self.display, self.click_through, self.skip_unchanged, self.audio,
+                         self.display, self.click_through, self.skip_unchanged, self.record_while_locked, self.audio,
                          self.audio_source, self.audio_bitrate, self.edge_enabled,
                          self.edge_start_color, self.edge_stop_color, self.edge_opacity,
                          self.edge_thickness, self.edge_gradient, self.edge_duration,
@@ -104,6 +106,8 @@ class LightRec(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._register_hotkeys(wait=False)
         self.after(250, self._poll)
+        self._desktop_locked = self._is_desktop_locked()
+        self.after(500, self._poll_desktop_lock)
         # Let the main window paint before starting FFmpeg's filter and encoder
         # probes. The probe remains lazy and is also triggered by Record.
         self.after(900, lambda: self._ensure_encoder_probe(self.codec.get()))
@@ -188,6 +192,7 @@ class LightRec(tk.Tk):
                 "display": int(self.display.get()),
                 "click_through": bool(self.click_through.get()),
                 "skip_unchanged": bool(self.skip_unchanged.get()),
+                "record_while_locked": bool(self.record_while_locked.get()),
                 "audio": bool(self.audio.get()),
                 "audio_source": self.audio_source.get(),
                 "audio_bitrate": int(self.audio_bitrate.get()),
@@ -214,6 +219,7 @@ class LightRec(tk.Tk):
             return
         fields = {
             "codec": self.codec, "fps": self.fps, "target_total_bitrate": self.target_total_bitrate,
+            "record_while_locked": self.record_while_locked,
             "target_bitrate_text": self.target_bitrate_text, "display": self.display,
             "audio_bitrate": self.audio_bitrate, "skip_unchanged": self.skip_unchanged,
             "click_through": self.click_through, "ffmpeg": self.ffmpeg,
@@ -389,7 +395,7 @@ class LightRec(tk.Tk):
             if hotkey_id == self.hotkeys.START and self.recorder.process is None:
                 self.start_recording()
             elif hotkey_id == self.hotkeys.STOP and self.recorder.process is not None:
-                self.stop_recording()
+                self.stop_recording("全局停止快捷键")
             elif hotkey_id == self.hotkeys.CLICK_THROUGH:
                 self.click_through.set(not self.click_through.get())
                 self._apply_click_through()
@@ -565,6 +571,7 @@ class LightRec(tk.Tk):
             region=self.region, audio_enabled=bool(self.audio.get()),
             audio_source=self.audio_source.get(), audio_bitrate=int(self.audio_bitrate.get()),
             skip_unchanged=bool(self.skip_unchanged.get()),
+            continue_when_locked=bool(self.record_while_locked.get()),
         )
         error = self.recorder.start(options, encoder)
         if error:
@@ -589,6 +596,8 @@ class LightRec(tk.Tk):
     def _recording_finished(self, result: RecordingResult) -> None:
         if result.success:
             self._set_busy(False, result.saved_text or "准备就绪")
+            if result.interrupted:
+                messagebox.showwarning("录制意外结束", result.message, parent=self)
         else:
             self._set_busy(False, "录制遇到问题")
             message = result.message
@@ -606,8 +615,8 @@ class LightRec(tk.Tk):
 
 
 
-    def stop_recording(self) -> None:
-        self.recorder.stop()
+    def stop_recording(self, reason: str = "点击停止并保存") -> None:
+        self.recorder.stop(reason)
 
 
     def _on_close(self) -> None:
@@ -660,7 +669,7 @@ class LightRec(tk.Tk):
         if self.recorder.process is not None:
             self.close_when_done = True
             if not self.recorder.finalizing:
-                self.stop_recording()
+                self.stop_recording("关闭窗口时请求保存并退出")
             return
         self._exit_app()
 
@@ -706,6 +715,7 @@ class LightRec(tk.Tk):
         if audio_error and recorder.audio_active and recorder.process and not recorder.finalizing:
             recorder.audio_runtime_error = audio_error
             recorder.audio_active = False
+            recorder._log_event("音频采集异常", audio_error)
             self.status.set(f"声音录制失败：{audio_error}；画面仍在录制")
         if recorder.process and recorder.started_at and recorder.process.poll() is None and not recorder.finalizing:
             if not recorder.audio_runtime_error:
@@ -716,6 +726,44 @@ class LightRec(tk.Tk):
                     f"{elapsed // 60}:{elapsed % 60:02d}{audio_status}"
                 )
         self.after(250, self._poll)
+
+    @staticmethod
+    def _is_desktop_locked() -> bool | None:
+        if os.name != "nt":
+            return False
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        open_desktop = user32.OpenInputDesktop
+        open_desktop.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        open_desktop.restype = wintypes.HANDLE
+        close_desktop = user32.CloseDesktop
+        close_desktop.argtypes = (wintypes.HANDLE,)
+        close_desktop.restype = wintypes.BOOL
+        get_info = user32.GetUserObjectInformationW
+        get_info.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p,
+                             wintypes.DWORD, ctypes.POINTER(wintypes.DWORD))
+        get_info.restype = wintypes.BOOL
+        desktop = open_desktop(0, False, 0x0001)  # DESKTOP_READOBJECTS
+        if not desktop:
+            return ctypes.get_last_error() == 5  # Secure Winlogon desktop may deny user-desktop access.
+        try:
+            needed = wintypes.DWORD()
+            get_info(desktop, 2, None, 0, ctypes.byref(needed))  # UOI_NAME
+            if not needed.value:
+                return None
+            name = ctypes.create_unicode_buffer((needed.value // ctypes.sizeof(wintypes.WCHAR)) + 1)
+            if not get_info(desktop, 2, name, ctypes.sizeof(name), ctypes.byref(needed)):
+                return ctypes.get_last_error() == 5
+            return name.value.casefold() != "default"
+        finally:
+            close_desktop(desktop)
+
+    def _poll_desktop_lock(self) -> None:
+        state = self._is_desktop_locked()
+        if state is not None and state != self._desktop_locked:
+            self._desktop_locked = state
+            if self.recorder.process is not None and not self.recorder.finalizing:
+                self.recorder.set_locked(state)
+        self.after(500, self._poll_desktop_lock)
 
     def _unregister_hotkeys(self) -> None:
         self.hotkeys.stop()

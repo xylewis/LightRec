@@ -35,8 +35,8 @@ class SettingsDialog:
         window = tk.Toplevel(self.parent)
         self.window = window
         window.title("LightRec Settings")
-        window.geometry("600x520")
-        window.minsize(560, 470)
+        window.geometry("600x560")
+        window.minsize(560, 510)
         window.transient(self.parent)
         body = ttk.Frame(window, padding=16)
         body.pack(fill="both", expand=True)
@@ -92,9 +92,12 @@ class SettingsDialog:
         ttk.Checkbutton(recording, text="窗口穿透（点击穿过 LightRec 窗口）",
                         variable=f["click_through"], command=self.on_click_through).grid(
                             row=7, column=0, columnspan=2, sticky="w", pady=4)
+        ttk.Checkbutton(recording, text="锁屏时继续录制（锁屏期间画面为黑屏，解锁后恢复）",
+                        variable=f["record_while_locked"]).grid(
+                            row=8, column=0, columnspan=2, sticky="w", pady=4)
 
         engine = ttk.LabelFrame(recording, text="录屏组件", padding=9)
-        engine.grid(row=8, column=0, columnspan=2, sticky="ew", pady=(14, 4))
+        engine.grid(row=9, column=0, columnspan=2, sticky="ew", pady=(10, 4))
         if self.ffmpeg_is_bundled:
             ttk.Label(engine, text="FFmpeg 已包含在 LightRec.exe 中，无需安装或设置路径。",
                       wraplength=470).pack(anchor="w")
