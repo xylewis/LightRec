@@ -32,14 +32,14 @@
 
 ## 重新打包（开发者）
 
-在 Windows 上安装 Python 3.14 和包含 `ddagrab` 桌面采集滤镜的 FFmpeg full build 后，运行：
+在 Windows 上安装 Python 3.14 和包含 `ddagrab` 桌面采集滤镜的 FFmpeg essentials 或 full build 后，运行：
 
 ```powershell
 py -3.14 -m pip install -r requirements-audio.txt -r requirements-build.txt
 ./build_windows.ps1
 ```
 
-打包脚本会先检查 FFmpeg 是否包含 `ddagrab`，不满足时会停止并提示。FFmpeg 官方下载页提供 Gyan.dev 和 BtbN 的 Windows 构建链接；请选用 full build，不要使用 EV 录屏目录里的旧版 FFmpeg。
+打包脚本会先检查 FFmpeg 是否包含 `ddagrab`，不满足时会停止并提示。FFmpeg 官方下载页提供 Gyan.dev 和 BtbN 的 Windows 构建链接；请选用 essentials 或 full build，不要使用 EV 录屏目录里的旧版 FFmpeg。
 
 第三方组件信息和许可证见 `THIRD_PARTY_NOTICES.txt`。当前电脑已验证短时录制；不同 Windows 版本和编码硬件仍需在对应电脑上实测。
 
