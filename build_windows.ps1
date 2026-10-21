@@ -16,6 +16,11 @@ if (-not $FFmpegPath -or -not (Test-Path -LiteralPath $FFmpegPath -PathType Leaf
     throw "找不到 ffmpeg.exe。请先安装 FFmpeg，或用 -FFmpegPath 指定完整路径。"
 }
 
+$ffmpegFilters = (& $FFmpegPath -hide_banner -filters 2>&1 | Out-String)
+if ($LASTEXITCODE -ne 0 -or $ffmpegFilters -notmatch '\bddagrab\b') {
+    throw "指定的 FFmpeg 不包含 ddagrab 桌面采集滤镜：$FFmpegPath`n请使用 FFmpeg 官方下载页链接的 Windows full build（如 Gyan full_build），再用 -FFmpegPath 指定其 bin\ffmpeg.exe。"
+}
+
 $distRoot = Join-Path $root "dist"
 $workRoot = Join-Path $root "build\pyinstaller"
 $buildDist = Join-Path $workRoot "dist"
