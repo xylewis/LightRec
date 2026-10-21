@@ -90,6 +90,8 @@ class RecordingSession:
         self.stop_reason = ""
         self.direct_d3d11 = False
         self.current_encoder: str | None = None
+        self.capture_recovery_times: list[float] = []
+        self.process_log_offset = 0
 
     @property
     def is_recording(self) -> bool:
@@ -114,6 +116,7 @@ class RecordingSession:
         self.video_segment_durations.clear()
         self.segment_started_at = None
         self.segment_index = 0
+        self.capture_recovery_times.clear()
         self.locked = False
         self.transitioning = False
         self.pending_lock_state = None
@@ -167,6 +170,7 @@ class RecordingSession:
         duplicate_frames = 0 if options.skip_unchanged else 1
         self.direct_d3d11 = encoder.endswith(("_amf", "_qsv"))
         video_args = self._video_args(encoder, video_bitrate, duplicate_frames, self.direct_d3d11)
+        self.process_log_offset = 0
         try:
             with open(self.log_path, "wb") as log:
                 self.process = subprocess.Popen(
@@ -338,6 +342,16 @@ class RecordingSession:
         if proc is None:
             return
         code = proc.wait()
+        if (not self.stopping and not self.transitioning and self.options
+                and self.options.continue_when_locked):
+            try:
+                locked = self.root._is_desktop_locked()
+            except Exception:
+                locked = None
+            if locked or self._desktop_capture_lost(self.process_log_offset):
+                self.root.after(
+                    0, lambda: self._recover_desktop_capture_exit(code, proc, bool(locked)))
+                return
         if (code != 0 and not self.stopping and self.started_at
                 and time.perf_counter() - self.started_at < 5):
             if self.direct_d3d11:
@@ -347,6 +361,57 @@ class RecordingSession:
                 self.root.after(0, lambda: self._restart_encoder_fallback(proc, code))
                 return
         self.root.after(0, lambda: self._encoder_exited(code, proc))
+
+    def _desktop_capture_lost(self, log_offset: int) -> bool:
+        if not self.log_path:
+            return False
+        try:
+            with self.log_path.open("rb") as log:
+                log.seek(max(log_offset, self.log_path.stat().st_size - 16_384))
+                tail = log.read().lower()
+            return b"887a0026" in tail or b"acquirenextframe failed" in tail
+        except OSError:
+            return False
+
+    def _recover_desktop_capture_exit(self, code: int, process: subprocess.Popen,
+                                      locked: bool) -> None:
+        if (self.process is not process or self.stopping or self.transitioning
+                or self.finalizing or not self.options):
+            return
+        self._log_event(
+            "桌面捕获中断，开始恢复",
+            f"FFmpeg退出码={code}; 当前锁屏状态={locked}; 原片段={self.video_tmp}; FFmpeg日志={self.log_path}",
+        )
+        if locked:
+            self.set_locked(True)
+            return
+
+        now = time.monotonic()
+        self.capture_recovery_times = [
+            timestamp for timestamp in self.capture_recovery_times if now - timestamp < 60
+        ]
+        if len(self.capture_recovery_times) >= 5:
+            self._log_event("桌面捕获恢复次数过多", "一分钟内已自动恢复五次；停止重试并保存已录制片段")
+            self._finish_unexpected_exit(code, process)
+            return
+        self.capture_recovery_times.append(now)
+
+        if self.video_tmp and self.video_tmp.exists() and self.video_tmp.stat().st_size:
+            self._record_current_segment()
+        elif self.video_tmp:
+            self.video_tmp.unlink(missing_ok=True)
+        self.direct_d3d11 = False
+        self.video_tmp = self._new_segment_path()
+        audio_bitrate = self.options.audio_bitrate if self.audio_active else 0
+        bitrate = video_bitrate_for(self.options.total_bitrate, audio_bitrate)
+        duplicates = 0 if self.options.skip_unchanged else 1
+        self._restart_process(
+            self.current_encoder or "libx264", bitrate, duplicates,
+            "桌面捕获中断后无法恢复：", append_log=True,
+        )
+        if self.process is not process:
+            self._log_event("桌面捕获已恢复", f"新片段={self.video_tmp}; 视频 PID={self.process.pid if self.process else '无'}")
+            self.on_status("桌面捕获已恢复，录制继续")
 
     def _restart_compat_path(self, failed_process: subprocess.Popen, code: int) -> None:
         if self.process is not failed_process or self.stopping or not self.direct_d3d11:
@@ -399,6 +464,7 @@ class RecordingSession:
                          still_image_path: Path | None = None) -> None:
         assert self.log_path
         try:
+            self.process_log_offset = self.log_path.stat().st_size if append_log else 0
             with open(self.log_path, "ab" if append_log else "wb") as log:
                 self.process = subprocess.Popen(
                     self._video_args(encoder, bitrate, duplicates, direct=False,
@@ -426,13 +492,18 @@ class RecordingSession:
     def _encoder_exited(self, code: int, process: subprocess.Popen) -> None:
         if self.process is not process or self.stopping or self.transitioning:
             return
-        if code != 0 and self.options and self.options.continue_when_locked:
+        if self.options and self.options.continue_when_locked:
             try:
                 if self.root._is_desktop_locked():
                     self.set_locked(True)
                     return
             except Exception:
                 pass
+        self._finish_unexpected_exit(code, process)
+
+    def _finish_unexpected_exit(self, code: int, process: subprocess.Popen) -> None:
+        if self.process is not process or self.stopping or self.transitioning or self.finalizing:
+            return
         self.unexpected_exit = True
         self._log_event("录制进程意外退出", f"FFmpeg退出码={code}; 已录制={self._elapsed()}秒; PID={self.process.pid}; FFmpeg日志={self.log_path}")
         self.on_stop_signal(False)
