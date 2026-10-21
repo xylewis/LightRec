@@ -248,12 +248,25 @@ class RecordingSession:
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait()
-        if self.video_tmp and self.video_tmp.exists() and self.video_tmp.stat().st_size:
+        current_segment = self.video_tmp
+        if current_segment and current_segment.exists() and current_segment.stat().st_size:
             self._record_current_segment()
         else:
-            self.root.after(0, lambda: self._schedule_failure("锁屏切换时当前视频片段未能保存。"))
+            self._log_event(
+                "锁屏切换时当前片段为空，沿用上一有效片段",
+                f"锁屏切换={locked}; 当前片段={current_segment}; FFmpeg退出码={process.returncode}; FFmpeg日志={self.log_path}",
+            )
+            if current_segment:
+                current_segment.unlink(missing_ok=True)
+        image_source = next(
+            (segment for segment in reversed(self.video_segments)
+             if segment.exists() and segment.stat().st_size),
+            None,
+        )
+        if image_source is None:
+            self.root.after(0, lambda: self._schedule_failure("锁屏切换时没有可用的视频片段，无法恢复录制；请查看诊断日志。"))
             return
-        if locked and not self._prepare_lock_image(self.video_tmp):
+        if locked and not self._prepare_lock_image(image_source):
             self.root.after(0, lambda: self._schedule_failure("无法生成锁屏黑屏占位画面；请查看诊断日志。"))
             return
         self.root.after(0, lambda: self._resume_after_lock_transition(locked))
@@ -288,12 +301,14 @@ class RecordingSession:
         audio_bitrate = self.options.audio_bitrate if self.audio_active else 0
         bitrate = video_bitrate_for(self.options.total_bitrate, audio_bitrate)
         duplicates = 0 if self.options.skip_unchanged else 1
-        self._restart_process(
+        restarted = self._restart_process(
             self.current_encoder, bitrate, duplicates,
             "锁屏切换后视频进程无法重新启动：", append_log=True,
             still_image_path=self.lock_image_path if locked else None,
         )
         self.transitioning = False
+        if not restarted:
+            return
         self._log_event("锁屏片段已开始" if locked else "桌面捕获已恢复",
                         f"片段={self.video_tmp}; 视频 PID={self.process.pid if self.process else '无'}")
         self.on_status("锁屏期间使用黑屏占位，录制仍在继续" if locked else "已解锁，桌面录制已恢复")
@@ -345,7 +360,8 @@ class RecordingSession:
         if (not self.stopping and not self.transitioning and self.options
                 and self.options.continue_when_locked):
             try:
-                locked = self.root._is_desktop_locked()
+                locked = (self.root._is_desktop_locked()
+                          or getattr(self.root, "_desktop_locked", False))
             except Exception:
                 locked = None
             if locked or self._desktop_capture_lost(self.process_log_offset):
@@ -383,6 +399,10 @@ class RecordingSession:
             f"FFmpeg退出码={code}; 当前锁屏状态={locked}; 原片段={self.video_tmp}; FFmpeg日志={self.log_path}",
         )
         if locked:
+            if self.locked:
+                # The placeholder FFmpeg process may also fail on the secure desktop.
+                # Force a new transition instead of treating set_locked(True) as a no-op.
+                self.locked = False
             self.set_locked(True)
             return
 
@@ -405,11 +425,11 @@ class RecordingSession:
         audio_bitrate = self.options.audio_bitrate if self.audio_active else 0
         bitrate = video_bitrate_for(self.options.total_bitrate, audio_bitrate)
         duplicates = 0 if self.options.skip_unchanged else 1
-        self._restart_process(
+        restarted = self._restart_process(
             self.current_encoder or "libx264", bitrate, duplicates,
             "桌面捕获中断后无法恢复：", append_log=True,
         )
-        if self.process is not process:
+        if restarted:
             self._log_event("桌面捕获已恢复", f"新片段={self.video_tmp}; 视频 PID={self.process.pid if self.process else '无'}")
             self.on_status("桌面捕获已恢复，录制继续")
 
@@ -461,7 +481,7 @@ class RecordingSession:
 
     def _restart_process(self, encoder: str, bitrate: int, duplicates: int,
                          error_prefix: str, append_log: bool = False,
-                         still_image_path: Path | None = None) -> None:
+                         still_image_path: Path | None = None) -> bool:
         assert self.log_path
         try:
             self.process_log_offset = self.log_path.stat().st_size if append_log else 0
@@ -474,11 +494,12 @@ class RecordingSession:
                 )
         except OSError as exc:
             self._schedule_failure(error_prefix + str(exc))
-            return
+            return False
         self.segment_started_at = time.monotonic()
         self.record_thread = threading.Thread(target=self._watch_encoder,
                                               name="lightrec-video", daemon=True)
         self.record_thread.start()
+        return True
 
     def _schedule_failure(self, message: str) -> None:
         self._log_event("录制失败", message)
@@ -495,7 +516,7 @@ class RecordingSession:
         if self.options and self.options.continue_when_locked:
             try:
                 if self.root._is_desktop_locked():
-                    self.set_locked(True)
+                    self._recover_desktop_capture_exit(code, process, True)
                     return
             except Exception:
                 pass

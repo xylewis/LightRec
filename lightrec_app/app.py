@@ -107,6 +107,7 @@ class LightRec(tk.Tk):
         self._register_hotkeys(wait=False)
         self.after(250, self._poll)
         self._desktop_locked = self._is_desktop_locked()
+        self._unlock_candidate_since: float | None = None
         self.after(500, self._poll_desktop_lock)
         # Let the main window paint before starting FFmpeg's filter and encoder
         # probes. The probe remains lazy and is also triggered by Record.
@@ -759,10 +760,27 @@ class LightRec(tk.Tk):
 
     def _poll_desktop_lock(self) -> None:
         state = self._is_desktop_locked()
-        if state is not None and state != self._desktop_locked:
-            self._desktop_locked = state
-            if self.recorder.process is not None and not self.recorder.finalizing:
-                self.recorder.set_locked(state)
+        if state is True:
+            self._unlock_candidate_since = None
+            if self._desktop_locked is not True:
+                self._desktop_locked = True
+                if self.recorder.process is not None and not self.recorder.finalizing:
+                    self.recorder.set_locked(True)
+        elif state is False:
+            if self._desktop_locked is True:
+                now = time.monotonic()
+                if self._unlock_candidate_since is None:
+                    self._unlock_candidate_since = now
+                elif now - self._unlock_candidate_since >= 1.5:
+                    self._desktop_locked = False
+                    self._unlock_candidate_since = None
+                    if self.recorder.process is not None and not self.recorder.finalizing:
+                        self.recorder.set_locked(False)
+            else:
+                self._desktop_locked = False
+                self._unlock_candidate_since = None
+        else:
+            self._unlock_candidate_since = None
         self.after(500, self._poll_desktop_lock)
 
     def _unregister_hotkeys(self) -> None:
